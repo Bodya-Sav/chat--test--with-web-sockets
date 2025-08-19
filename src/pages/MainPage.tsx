@@ -1,44 +1,72 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
-import { Api } from "../../service/api";
+import { Api, type User, type Chat } from "../../service/api";
 import { useUser } from "../context/useUser";
 import { useNavigate } from "react-router-dom";
 import styles from "../styles/MainPage.module.css";
-
-// Пример локальных пользователей и чатов
-const users = [
-  { id: 1, name: "Иван Иванов" },
-  { id: 2, name: "Мария Петрова" },
-  { id: 3, name: "Алексей Смирнов" },
-];
-
-const initialChats: { id: number; userId: number; messages: string[] }[] = [];
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import ListOfUsers from "../components/ListOfUsers";
+import ChatWithUser from "../components/ChatWithUser";
+import ListOfChats from "../components/ListOfChats";
 
 export default function MainPage() {
-  const [chats, setChats] = useState(initialChats);
-  const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const navigate = useNavigate();
   const { user, setUser } = useUser();
+  const [users, setUsers] = useState<User[]>([]);
+  const [chats, setChats] = useState<Chat[]>([]);
+
+  const [hovered, setHovered] = useState(false);
+  const [showList, setShowList] = useState(false);
+
+  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+
+  // Загружаем пользователей и чаты при монтировании страницы
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const data = await Api.getUsers();
+        setUsers(data);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      } catch (error) {
+        toast.error("Не удалось загрузить пользователей");
+      }
+    };
+
+    const loadChats = async () => {
+      try {
+        const data = await Api.getChats();
+        setChats(data);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      } catch (error) {
+        toast.error("Не удалось загрузить чаты");
+      }
+    };
+
+    loadUsers();
+    loadChats();
+  }, []);
+
+  const handleSelectUser = async (u: User) => {
+    try {
+      const newChat = await Api.createNewChatWithUser(u.name!, u.id!);
+      toast.success(`Чат с ${u.name || u.email} создан`);
+      setChats((prev) => [...prev, newChat]);
+      setShowList(false);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (err) {
+      toast.error("Не удалось создать чат");
+    }
+  };
+
+  const handleCreateChat = () => {
+    setShowList(true);
+  }
 
   const handleLogout = () => {
-    Api.logout();       // очищаем токен и user из localStorage
-    setUser(null);      // сбрасываем контекст
+    Api.logout();
+    setUser(null);
     navigate("/auth", { replace: true });
   };
-
-  const handleCreateChat = (userId: number) => {
-    const newChat = {
-      id: Date.now(),
-      userId,
-      messages: [],
-    };
-    setChats([...chats, newChat]);
-    setSelectedChatId(newChat.id);
-  };
-
-  const selectedChat = chats.find((chat) => chat.id === selectedChatId);
-  const selectedUser =
-    selectedChat && users.find((u) => u.id === selectedChat.userId);
 
   return (
     <motion.div
@@ -50,120 +78,75 @@ export default function MainPage() {
     >
       <div className={styles.container}>
         {/* Левая секция: список чатов и создание */}
-        <div className={styles.sidebar}>
-          <p>
-            Вы вошли как: <strong>{user?.username || "unknown"}</strong>
+        <div
+          className={styles.sidebar}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}>
+          <p className={styles.username}>
+            <strong>{user?.username || "unknown"}</strong>
           </p>
-          <h3>Чаты</h3>
-          {chats.length === 0 ? (
-            <div className={styles.empty}>
-              <div>Нет чатов</div>
-              <div className={styles.createBlock}>
-                <span>Создать чат с:</span>
-                {users.map((user) => (
-                  <button
-                    key={user.id}
-                    className={styles.createBtn}
-                    onClick={() => handleCreateChat(user.id)}
-                  >
-                    {user.name}
-                  </button>
-                ))}
-              </div>
-            </div>
+
+          {showList ? (
+            <ListOfUsers
+              users={users}
+              onClose={() => setShowList(false)}
+              onSelectUser={handleSelectUser}
+            />
           ) : (
-            <ul className={styles.chatList}>
-              {chats.map((chat) => {
-                const user = users.find((u) => u.id === chat.userId);
-                return (
-                  <li
-                    key={chat.id}
-                    className={
-                      chat.id === selectedChatId
-                        ? styles.chatItemActive
-                        : styles.chatItem
-                    }
-                    onClick={() => setSelectedChatId(chat.id)}
+            <div className={styles.chatscontainer}>
+              {chats.length > 0 ? (
+                <>
+                  <ListOfChats
+                    chats={chats}
+                    onSelectUser={(chat) => setSelectedChat(chat)}
+                  />
+
+                  <motion.button
+                    className={styles.addchat}
+                    onClick={handleCreateChat}
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={hovered ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.3 }}
                   >
-                    {user?.name || "Пользователь"}
-                  </li>
-                );
-              })}
-            </ul>
+                    ➕</motion.button>
+                </>
+              ) : (
+                <>
+                  <p>чатов еще нет</p>
+                  <motion.button
+                    className={styles.addchat}
+                    onClick={handleCreateChat}
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={
+                      hovered ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.8 }
+                    }
+                    transition={{ duration: 0.3 }}
+                  >
+                    ➕
+                  </motion.button>
+                </>
+              )}
+            </div>
           )}
-          <button
-            className={styles.logoutBtn}
-            onClick={handleLogout}
-          >
-            Выйти
-          </button>
+
+          <div className={styles.sidebarBottom}>
+            <button
+              className={styles.logoutBtn}
+              onClick={handleLogout}
+            >
+              Выйти
+            </button>
+          </div>
         </div>
         {/* Правая секция: чат */}
         <div className={styles.chatSection}>
-          {!selectedChat ? (
-            <div className={styles.placeholder}>
-              Выберите чат слева или создайте новый
-            </div>
+          {selectedChat ? (
+            <ChatWithUser chat={selectedChat} />
           ) : (
-            <div>
-              <h3>Чат с {selectedUser?.name}</h3>
-              <div className={styles.messages}>
-                {selectedChat.messages.length === 0 ? (
-                  <div className={styles.placeholder}>Нет сообщений</div>
-                ) : (
-                  selectedChat.messages.map((msg, idx) => (
-                    <div key={idx} className={styles.message}>
-                      {msg}
-                    </div>
-                  ))
-                )}
-              </div>
-              {/* Форма отправки сообщения */}
-              <ChatInput
-                onSend={(text) => {
-                  setChats((prev) =>
-                    prev.map((chat) =>
-                      chat.id === selectedChat.id
-                        ? {
-                          ...chat,
-                          messages: [...chat.messages, text],
-                        }
-                        : chat
-                    )
-                  );
-                }}
-              />
-            </div>
+            <p>Выберите чат слева</p>
           )}
         </div>
-      </div>
-    </motion.div>
-  );
-}
-
-// Компонент ввода сообщения
-function ChatInput({ onSend }: { onSend: (text: string) => void }) {
-  const [text, setText] = useState("");
-  return (
-    <form
-      className={styles.inputForm}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (text.trim()) {
-          onSend(text);
-          setText("");
-        }
-      }}
-    >
-      <input
-        className={styles.input}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Введите сообщение..."
-      />
-      <button className={styles.button} type="submit">
-        Отправить
-      </button>
-    </form>
+      </div >
+    </motion.div >
   );
 }

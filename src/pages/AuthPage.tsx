@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import styles from '../styles/AuthPage.module.css'
 import { Api } from '../../service/api'
@@ -8,16 +8,30 @@ import { useNavigate } from "react-router-dom";
 interface AuthFormState {
   email: string;
   password: string;
+  remember: boolean;
 }
 
 export default function AuthPage() {
-  const [form, setForm] = useState<AuthFormState>({ email: "", password: "" });
+  const [form, setForm] = useState<AuthFormState>({ email: "", password: "", remember: false });
   const [error, setError] = useState<string | null>(null);
   const { fetchUser } = useUser();
   const navigate = useNavigate();
 
+  // при загрузке подставляем сохранённые данные
+  useEffect(() => {
+    const saved = localStorage.getItem("auth_form");
+    if (saved) {
+      const parsed = JSON.parse(saved) as AuthFormState;
+      setForm({ ...parsed, remember: true }); // подставляем и сразу отмечаем чекбокс
+    }
+  }, []);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value, type, checked } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -25,8 +39,15 @@ export default function AuthPage() {
     setError(null);
     try {
       await Api.login(form);
-      await fetchUser(); // подтягиваем данные из /me
-      navigate("/chats", { replace: true }); // вместо window.location.href
+      await fetchUser();
+
+      if (form.remember) {
+        localStorage.setItem("auth_form", JSON.stringify({ email: form.email, password: form.password }));
+      } else {
+        localStorage.removeItem("auth_form");
+      }
+
+      navigate("/chats", { replace: true });
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message || "Ошибка авторизации");
@@ -65,6 +86,15 @@ export default function AuthPage() {
             placeholder="Password"
             required
           />
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              name="remember"
+              checked={form.remember}
+              onChange={handleChange}
+            />
+            <p style={{ margin: 0 }}>запомнить?</p>
+          </div>
           <button className={styles.button} type="submit">Войти</button>
           {error && <div style={{ color: 'red', textAlign: 'center' }}>{error}</div>}
           <div style={{ textAlign: 'center', marginTop: '10px' }}>

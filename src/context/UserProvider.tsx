@@ -18,7 +18,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (!user && Api.getToken()) {
       fetchUser();
     }
-  }, []);
+  }, [user]);
 
   return (
     <UserContext.Provider value={{ user, setUser, fetchUser }}>

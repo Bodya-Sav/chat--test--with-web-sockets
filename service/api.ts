@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { BASE_URL } from "../src/consts/config";
 
 interface LoginPayload {
@@ -13,7 +14,23 @@ interface RegisterPayload {
 
 export interface User {
   email: string;
+  id?: string;
+  name?: string;
   username?: string;
+}
+
+export interface Chat {
+  id: string;
+  name: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface Message {
+  id: string;
+  sender: string;
+  text: string;
+  created_at: string;
 }
 
 export class Api {
@@ -23,7 +40,10 @@ export class Api {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("Ошибка авторизации");
+    if (!res.ok) {
+      toast.error("Ошибка авторизации");
+      throw new Error("Ошибка авторизации");
+    }
     const data = await res.json();
     localStorage.setItem("user", JSON.stringify(data));
     localStorage.setItem("token", data.token);
@@ -36,7 +56,10 @@ export class Api {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("Ошибка регистрации");
+    if (!res.ok) {
+      toast.error("Ошибка регистрации");
+      throw new Error("Ошибка регистрации");
+    }
     const data = await res.json();
     localStorage.setItem("user", JSON.stringify(data));
     localStorage.setItem("token", data.token);
@@ -77,7 +100,107 @@ export class Api {
         "Content-Type": "application/json",
       },
     });
-    if (!res.ok) throw new Error("Ошибка получения списка пользователей");
+    if (!res.ok) {
+      toast.error("Ошибка получения списка пользователей");
+      throw new Error("Ошибка получения списка пользователей");
+    }
     return await res.json();
+  }
+
+  static async getChats(): Promise<Chat[]> {
+    const token = Api.getToken();
+    const res = await fetch(`${BASE_URL}/chats`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!res.ok) {
+      toast.error("Ошибка получения списка чатов");
+      throw new Error("Ошибка получения списка чатов");
+    }
+    return await res.json();
+  }
+
+  static async getChatDetails(id: number): Promise<Chat> {
+    const token = Api.getToken();
+    const res = await fetch(`${BASE_URL}/chats/${id}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!res.ok) {
+      toast.error("Ошибка получения деталей чата");
+      throw new Error("Ошибка получения деталей чата");
+    }
+    return await res.json();
+  }
+
+  static async createNewChatWithUser(
+    chat_name: string,
+    user_id: string
+  ): Promise<Chat> {
+    const token = Api.getToken();
+    const res = await fetch(`${BASE_URL}/chats`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chat_name, user_id }), // <- бек ожидает id собеседника
+    });
+
+    if (!res.ok) {
+      toast.error("Ошибка создания чата");
+      throw new Error("Ошибка создания чата");
+    }
+    return await res.json();
+  }
+
+  static async addMemberToChat(
+    id: string,
+    payload: RegisterPayload
+  ): Promise<string> {
+    const res = await fetch(`${BASE_URL}/chats/${id}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      toast.error("Ошибка добавления пользователя в чат");
+      throw new Error("Ошибка добавления пользователя в чат");
+    }
+    const data = await res.json();
+    localStorage.setItem("user", JSON.stringify(data));
+    localStorage.setItem("token", data.token);
+    return data;
+  }
+
+  static async getChatMessages(
+    id: string,
+    limit = 50,
+    offset = 0
+  ): Promise<Message[]> {
+    const token = Api.getToken();
+    const res = await fetch(
+      `${BASE_URL}/chats/${id}/messages?limit=${limit}&offset=${offset}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    if (!res.ok) {
+      toast.error("Ошибка получения сообщений чата");
+      throw new Error("Ошибка получения сообщений чата");
+    }
+    const data = await res.json();
+
+    // всегда возвращаем массив
+    if (!Array.isArray(data)) return [];
+    return data;
   }
 }
