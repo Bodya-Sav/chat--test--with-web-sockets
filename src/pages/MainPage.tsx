@@ -33,7 +33,20 @@ export default function MainPage() {
     const loadChats = async () => {
       try {
         const data = await Api.getChats();
-        setChats(Array.isArray(data) ? data : []);
+
+        // нормализуем чаты под "имя собеседника"
+        const normalized = (Array.isArray(data) ? data : []).map((chat) => {
+          if (user) {
+            const other = chat.members?.find((m) => m.id !== user.id);
+            return {
+              ...chat,
+              name: other?.name || chat.name,
+            };
+          }
+          return chat;
+        });
+
+        setChats(normalized);
       } catch {
         toast.error("Не удалось загрузить чаты");
         setChats([]);
@@ -42,6 +55,16 @@ export default function MainPage() {
 
     loadUsers();
     loadChats();
+  }, [user]);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedChat(null);
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
   }, []);
 
   const handleSelectUser = async (u: User) => {
