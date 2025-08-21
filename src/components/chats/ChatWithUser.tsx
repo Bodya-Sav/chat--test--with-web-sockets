@@ -16,6 +16,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [newMessagesCount, setNewMessagesCount] = useState(0);
   const [wsStatus, setWsStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [isTyping, setIsTyping] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -24,16 +25,15 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const limit = 50;
   const reconnectTimeoutRef = useRef<number | null>(null);
   const isUnmountingRef = useRef(false);
-
-  // когда true — "прилип" к низу, новые сообщения должны автоскроллить вниз
   const stickToBottomRef = useRef(true);
+  const typingTimeoutRef = useRef<number | null>(null);
 
   const localUser = localStorage.getItem("user");
   const parsedUser = localUser ? JSON.parse(localUser) : null;
   const localUserId = parsedUser?.user_id as string | undefined;
   const token = parsedUser?.token as string | undefined;
 
-  const BOTTOM_GAP = 12; // допуск в пикселях для определения низа
+  const BOTTOM_GAP = 12;
 
   const isAtBottom = (el: HTMLElement) =>
     el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_GAP;
@@ -41,7 +41,6 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const scheduleScrollToBottom = (instant = false) => {
     const container = messagesContainerRef.current;
     if (!container) return;
-    // двойной rAF — чтобы дождаться вставки DOM после setState
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         container.scrollTo({
@@ -58,95 +57,76 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     setNewMessagesCount(0);
   };
 
-  // Функция для закрытия WebSocket подключения
   const closeWebSocket = () => {
     if (wsRef.current) {
-      // Устанавливаем readyState в CLOSING чтобы предотвратить отправку сообщений
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        try { wsRef.current.send(JSON.stringify({ type: 'disconnect' })); } catch { /* empty */ }
+      }
+      wsRef.current.onopen = null;
       wsRef.current.onclose = null;
       wsRef.current.onerror = null;
       wsRef.current.onmessage = null;
-
       if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
-        wsRef.current.close();
+        wsRef.current.close(1000, 'Component unmounting');
       }
       wsRef.current = null;
     }
-
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-
     setWsStatus('disconnected');
   };
 
-  // Функция для создания WebSocket подключения
   const createWebSocket = () => {
     if (!chat.id || !token || isUnmountingRef.current) return;
-
-    // Закрываем существующее подключение
     closeWebSocket();
-
     setWsStatus('connecting');
 
     const ws = new WebSocket(`${BASE_URL}/ws?token=${token}&chat_id=${chat.id}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      if (isUnmountingRef.current) {
-        ws.close();
-        return;
-      }
-
-      console.log("WebSocket connected");
+      if (isUnmountingRef.current) { ws.close(1000, 'Component unmounting'); return; }
       setWsStatus('connected');
     };
 
     ws.onclose = (event) => {
-      console.log("WebSocket closed", event.code, event.reason);
       setWsStatus('disconnected');
-
-      // Переподключение только если не размонтируется компонент и закрытие не было намеренным
-      if (!isUnmountingRef.current && event.code !== 1000) {
-        console.log("Attempting to reconnect...");
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (!isUnmountingRef.current) {
-            createWebSocket();
-          }
-        }, 3000) as unknown as number;
+      if (!isUnmountingRef.current && event.code !== 1000 && event.code !== 1001) {
+        reconnectTimeoutRef.current = setTimeout(() => { if (!isUnmountingRef.current) createWebSocket(); }, 3000) as unknown as number;
       }
     };
 
-    ws.onerror = (err) => {
-      console.error("WebSocket error:", err);
-    };
+    ws.onerror = () => { setWsStatus('disconnected'); };
 
     ws.onmessage = (event) => {
       if (isUnmountingRef.current) return;
-
       try {
-        const msg: ApiMessage = JSON.parse(event.data);
-        const container = messagesContainerRef.current;
+        const msg = JSON.parse(event.data);
 
-        // фиксируем, был ли пользователь "внизу" ДО вставки сообщения
-        const wasAtBottom = container ? isAtBottom(container) : true;
-        const isMine = localUserId ? msg.user_id === localUserId : false;
+        if (msg.type === 'message') {
+          const container = messagesContainerRef.current;
+          const wasAtBottom = container ? isAtBottom(container) : true;
+          const isMine = localUserId ? msg.user_id === localUserId : false;
 
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === msg.id)) return prev; // защита от дублей
-          return [...prev, msg];
-        });
+          setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]);
 
-        // логика индикатора/скролла
-        if (wasAtBottom || isMine || stickToBottomRef.current) {
-          stickToBottomRef.current = true;
-          scheduleScrollToBottom(); // дождёмся рендера и доскроллим
-        } else {
-          setNewMessagesCount((c) => c + 1); // считаем только чужие, когда не внизу
+          if (wasAtBottom || isMine || stickToBottomRef.current) {
+            stickToBottomRef.current = true;
+            scheduleScrollToBottom();
+          } else {
+            setNewMessagesCount((c) => c + 1);
+          }
+
+          setIsTyping(false);
         }
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-      }
+
+        if (msg.type === 'typing' && msg.user_id !== localUserId) {
+          setIsTyping(msg.isTyping);
+        }
+
+      } catch (error) { console.error("WS parse error:", error); }
     };
   };
 
@@ -178,86 +158,66 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
 
       setMessages((prev) => [...data, ...prev]);
 
-      // сохраняем позицию при prepend
       setTimeout(() => {
         const scrollHeightAfter = container.scrollHeight;
         container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
       }, 0);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
   /** Первичная загрузка + WebSocket */
   useEffect(() => {
     if (!chat.id || !token) return;
-
-    // Помечаем, что компонент не размонтируется
     isUnmountingRef.current = false;
-
-    // сброс состояния
-    setMessages([]);
-    setNewMessagesCount(0);
-    offsetRef.current = 0;
-    setHasMore(true);
-    stickToBottomRef.current = true;
-
-    (async () => {
-      await loadMessages();
-      scrollToBottom(true); // всегда в самый низ после первой загрузки
-    })();
-
-    // Создаем WebSocket подключение
+    setMessages([]); setNewMessagesCount(0); offsetRef.current = 0; setHasMore(true); stickToBottomRef.current = true;
+    (async () => { await loadMessages(); scrollToBottom(true); })();
     createWebSocket();
+    return () => { isUnmountingRef.current = true; closeWebSocket(); };
+  }, [chat.id, token]);
 
-    // Cleanup функция
-    return () => {
-      isUnmountingRef.current = true;
-      closeWebSocket();
-    };
-  }, [chat.id, token, localUserId]);
-
-  // Очистка при размонтировании компонента
-  useEffect(() => {
-    return () => {
-      isUnmountingRef.current = true;
-      closeWebSocket();
-    };
-  }, []);
-
-  /** Автоскролл при добавлении новых сообщений, если "приклеены" к низу */
   useEffect(() => {
     if (stickToBottomRef.current) scheduleScrollToBottom();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
   /** Отправка сообщений через WebSocket */
   const handleSend = () => {
     if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    stickToBottomRef.current = true;
+    wsRef.current.send(JSON.stringify({ type: 'message', content: input }));
+    setInput("");
 
-    try {
-      // при отправке собственного сообщения хотим остаться внизу
-      stickToBottomRef.current = true;
-      wsRef.current.send(JSON.stringify({ content: input }));
-      setInput("");
-    } catch (error) {
-      console.error("Error sending message:", error);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
     }
   };
 
-  /** Скролл и кнопка вниз */
+  /** Отправка события "печатает" с автоотключением через 1 секунду */
+  const handleInputChange = (value: string) => {
+    setInput(value);
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: value.length > 0 }));
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (value.length > 0) {
+      typingTimeoutRef.current = window.setTimeout(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
+        }
+      }, 1000);
+    }
+  };
+
   const handleScroll = () => {
     const container = messagesContainerRef.current;
     if (!container) return;
-
     if (container.scrollTop < 50) loadMessages();
-
     const atBottom = isAtBottom(container);
     stickToBottomRef.current = atBottom;
     setShowScrollDown(!atBottom);
-
     if (atBottom) setNewMessagesCount(0);
   };
 
@@ -267,6 +227,14 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         <div className={styles.avatar}>{chat.name?.[0]?.toUpperCase()}</div>
         <p className={styles.chatTitle}>
           <strong>{chat.name}</strong>
+          {isTyping && (
+            <span className={styles.typingIndicator}>
+              печатает
+              <span className={styles.dot}>.</span>
+              <span className={styles.dot}>.</span>
+              <span className={styles.dot}>.</span>
+            </span>
+          )}
           {wsStatus === 'connecting' && <span style={{ color: '#ffa500', fontSize: '12px', marginLeft: '8px' }}>подключение...</span>}
           {wsStatus === 'disconnected' && <span style={{ color: '#ff4444', fontSize: '12px', marginLeft: '8px' }}>нет связи</span>}
         </p>
@@ -301,7 +269,6 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         )}
       </div>
 
-      {/* Индикатор новых сообщений */}
       {newMessagesCount > 0 && (
         <div
           style={{
@@ -327,12 +294,11 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         </div>
       )}
 
-      {/* Кнопка скролла вниз */}
       <div
         style={{
           position: "absolute",
-          bottom: "70px",
-          left: "50%",
+          bottom: "10%",
+          left: "65%",
           transform: "translateX(-50%)",
           cursor: "pointer",
           background: "#fff",
@@ -358,7 +324,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
           ref={inputRef}
           className={styles.messageInput}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => handleInputChange(e.target.value)}
           placeholder={wsStatus === 'connected' ? "Сообщение" : "Подключение..."}
           disabled={wsStatus !== 'connected'}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
