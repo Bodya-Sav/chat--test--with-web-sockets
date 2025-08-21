@@ -14,17 +14,141 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [newMessagesCount, setNewMessagesCount] = useState(0);
+  const [wsStatus, setWsStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const offsetRef = useRef(0);
   const limit = 50;
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const isUnmountingRef = useRef(false);
+
+  // когда true — "прилип" к низу, новые сообщения должны автоскроллить вниз
+  const stickToBottomRef = useRef(true);
 
   const localUser = localStorage.getItem("user");
   const parsedUser = localUser ? JSON.parse(localUser) : null;
-  const localUserId = parsedUser?.user_id;
-  const token = parsedUser?.token;
+  const localUserId = parsedUser?.user_id as string | undefined;
+  const token = parsedUser?.token as string | undefined;
+
+  const BOTTOM_GAP = 12; // допуск в пикселях для определения низа
+
+  const isAtBottom = (el: HTMLElement) =>
+    el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_GAP;
+
+  const scheduleScrollToBottom = (instant = false) => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    // двойной rAF — чтобы дождаться вставки DOM после setState
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: instant ? "auto" : "smooth",
+        });
+      });
+    });
+  };
+
+  const scrollToBottom = (instant = false) => {
+    stickToBottomRef.current = true;
+    scheduleScrollToBottom(instant);
+    setNewMessagesCount(0);
+  };
+
+  // Функция для закрытия WebSocket подключения
+  const closeWebSocket = () => {
+    if (wsRef.current) {
+      // Устанавливаем readyState в CLOSING чтобы предотвратить отправку сообщений
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onmessage = null;
+
+      if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+        wsRef.current.close();
+      }
+      wsRef.current = null;
+    }
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    setWsStatus('disconnected');
+  };
+
+  // Функция для создания WebSocket подключения
+  const createWebSocket = () => {
+    if (!chat.id || !token || isUnmountingRef.current) return;
+
+    // Закрываем существующее подключение
+    closeWebSocket();
+
+    setWsStatus('connecting');
+
+    const ws = new WebSocket(`${BASE_URL}/ws?token=${token}&chat_id=${chat.id}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (isUnmountingRef.current) {
+        ws.close();
+        return;
+      }
+
+      console.log("WebSocket connected");
+      setWsStatus('connected');
+    };
+
+    ws.onclose = (event) => {
+      console.log("WebSocket closed", event.code, event.reason);
+      setWsStatus('disconnected');
+
+      // Переподключение только если не размонтируется компонент и закрытие не было намеренным
+      if (!isUnmountingRef.current && event.code !== 1000) {
+        console.log("Attempting to reconnect...");
+        reconnectTimeoutRef.current = setTimeout(() => {
+          if (!isUnmountingRef.current) {
+            createWebSocket();
+          }
+        }, 3000) as unknown as number;
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+
+    ws.onmessage = (event) => {
+      if (isUnmountingRef.current) return;
+
+      try {
+        const msg: ApiMessage = JSON.parse(event.data);
+        const container = messagesContainerRef.current;
+
+        // фиксируем, был ли пользователь "внизу" ДО вставки сообщения
+        const wasAtBottom = container ? isAtBottom(container) : true;
+        const isMine = localUserId ? msg.user_id === localUserId : false;
+
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev; // защита от дублей
+          return [...prev, msg];
+        });
+
+        // логика индикатора/скролла
+        if (wasAtBottom || isMine || stickToBottomRef.current) {
+          stickToBottomRef.current = true;
+          scheduleScrollToBottom(); // дождёмся рендера и доскроллим
+        } else {
+          setNewMessagesCount((c) => c + 1); // считаем только чужие, когда не внизу
+        }
+      } catch (error) {
+        console.error("Error parsing WebSocket message:", error);
+      }
+    };
+  };
 
   /** Фокус на input при печати */
   useEffect(() => {
@@ -44,7 +168,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     if (!hasMore || loading || !messagesContainerRef.current) return;
     setLoading(true);
     try {
-      const container = messagesContainerRef.current;
+      const container = messagesContainerRef.current!;
       const scrollHeightBefore = container.scrollHeight;
       const scrollTopBefore = container.scrollTop;
 
@@ -54,7 +178,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
 
       setMessages((prev) => [...data, ...prev]);
 
-      // Сохраняем текущую позицию скролла
+      // сохраняем позицию при prepend
       setTimeout(() => {
         const scrollHeightAfter = container.scrollHeight;
         container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
@@ -66,41 +190,61 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     }
   };
 
-  /** WebSocket подключение для новых сообщений */
+  /** Первичная загрузка + WebSocket */
   useEffect(() => {
     if (!chat.id || !token) return;
 
-    // Сброс
+    // Помечаем, что компонент не размонтируется
+    isUnmountingRef.current = false;
+
+    // сброс состояния
     setMessages([]);
+    setNewMessagesCount(0);
     offsetRef.current = 0;
     setHasMore(true);
-    loadMessages();
+    stickToBottomRef.current = true;
 
-    const ws = new WebSocket(`${BASE_URL}/ws?token=${token}&chat_id=${chat.id}`);
-    wsRef.current = ws;
+    (async () => {
+      await loadMessages();
+      scrollToBottom(true); // всегда в самый низ после первой загрузки
+    })();
 
-    ws.onopen = () => console.log("WebSocket connected");
-    ws.onclose = () => console.log("WebSocket closed");
-    ws.onerror = (err) => console.error("WebSocket error:", err);
+    // Создаем WebSocket подключение
+    createWebSocket();
 
-    ws.onmessage = (event) => {
-      const msg: ApiMessage = JSON.parse(event.data);
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
-      scrollToBottom();
+    // Cleanup функция
+    return () => {
+      isUnmountingRef.current = true;
+      closeWebSocket();
     };
+  }, [chat.id, token, localUserId]);
 
-    return () => ws.close();
-  }, [chat.id, token]);
+  // Очистка при размонтировании компонента
+  useEffect(() => {
+    return () => {
+      isUnmountingRef.current = true;
+      closeWebSocket();
+    };
+  }, []);
+
+  /** Автоскролл при добавлении новых сообщений, если "приклеены" к низу */
+  useEffect(() => {
+    if (stickToBottomRef.current) scheduleScrollToBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
 
   /** Отправка сообщений через WebSocket */
   const handleSend = () => {
     if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    wsRef.current.send(JSON.stringify({ content: input }));
-    setInput("");
+    try {
+      // при отправке собственного сообщения хотим остаться внизу
+      stickToBottomRef.current = true;
+      wsRef.current.send(JSON.stringify({ content: input }));
+      setInput("");
+    } catch (error) {
+      console.error("Error sending message:", error);
+    }
   };
 
   /** Скролл и кнопка вниз */
@@ -110,23 +254,22 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
 
     if (container.scrollTop < 50) loadMessages();
 
-    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+    const atBottom = isAtBottom(container);
+    stickToBottomRef.current = atBottom;
     setShowScrollDown(!atBottom);
-  };
 
-  const scrollToBottom = () => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    requestAnimationFrame(() => {
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-    });
+    if (atBottom) setNewMessagesCount(0);
   };
 
   return (
     <div className={styles.chatWindow}>
       <div className={styles.chatbar}>
         <div className={styles.avatar}>{chat.name?.[0]?.toUpperCase()}</div>
-        <p className={styles.chatTitle}><strong>{chat.name}</strong></p>
+        <p className={styles.chatTitle}>
+          <strong>{chat.name}</strong>
+          {wsStatus === 'connecting' && <span style={{ color: '#ffa500', fontSize: '12px', marginLeft: '8px' }}>подключение...</span>}
+          {wsStatus === 'disconnected' && <span style={{ color: '#ff4444', fontSize: '12px', marginLeft: '8px' }}>нет связи</span>}
+        </p>
       </div>
 
       <div
@@ -158,6 +301,32 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         )}
       </div>
 
+      {/* Индикатор новых сообщений */}
+      {newMessagesCount > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "120px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#007bff",
+            color: "#fff",
+            padding: "6px 12px",
+            borderRadius: "16px",
+            cursor: "pointer",
+            fontSize: "14px",
+            fontWeight: 500,
+            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+            zIndex: 10,
+            userSelect: "none",
+          }}
+          onClick={() => scrollToBottom()}
+          title="Показать новые сообщения"
+        >
+          Новые сообщения ({newMessagesCount})
+        </div>
+      )}
+
       {/* Кнопка скролла вниз */}
       <div
         style={{
@@ -178,7 +347,8 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
           opacity: showScrollDown ? 1 : 0,
           transition: "opacity 0.3s ease",
         }}
-        onClick={scrollToBottom}
+        onClick={() => scrollToBottom()}
+        title="Вниз"
       >
         <ChevronDown size={24} />
       </div>
@@ -189,10 +359,15 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
           className={styles.messageInput}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Сообщение"
+          placeholder={wsStatus === 'connected' ? "Сообщение" : "Подключение..."}
+          disabled={wsStatus !== 'connected'}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
         />
-        <button className={styles.sendBtn} onClick={handleSend}>
+        <button
+          className={styles.sendBtn}
+          onClick={handleSend}
+          disabled={wsStatus !== 'connected' || !input.trim()}
+        >
           <SendHorizontal size={24} />
         </button>
       </div>
