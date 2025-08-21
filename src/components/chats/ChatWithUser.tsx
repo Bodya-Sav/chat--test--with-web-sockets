@@ -230,7 +230,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     <div className={styles.chatWindow}>
       <div className={styles.chatbar}>
         <div className={styles.avatar}>{chat.name?.[0]?.toUpperCase()}</div>
-        <p className={styles.chatTitle}>
+        <div className={styles.chatTitle}>
           <strong>{chat.name}</strong>
           {wsStatus === 'connecting' && <span style={{ color: '#ffa500', fontSize: '12px', marginLeft: '8px' }}>подключение...</span>}
           {wsStatus === 'disconnected' && <span style={{ color: '#ff4444', fontSize: '12px', marginLeft: '8px' }}>нет связи</span>}
@@ -246,7 +246,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
               </div>
             )
           }
-        </p>
+        </div>
       </div>
 
       <div
