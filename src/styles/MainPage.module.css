@@ -260,7 +260,6 @@
   flex: 1;
   overflow-y: auto;
   padding: 8px 12px;
-  justify-content: flex-end;
   display: flex;
   flex-direction: column;
   gap: 6px;
