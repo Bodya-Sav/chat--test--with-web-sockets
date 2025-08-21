@@ -24,12 +24,7 @@ export interface Chat {
   name: string;
   created_at: string;
   created_by: string;
-  members: [
-    {
-      id: string;
-      name: string;
-    }
-  ];
+  members: User[];
 }
 
 export interface Message {

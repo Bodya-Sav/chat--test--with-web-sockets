@@ -34,14 +34,17 @@ export default function MainPage() {
       try {
         const data = await Api.getChats();
 
-        // нормализуем чаты под "имя собеседника"
         const normalized = (Array.isArray(data) ? data : []).map((chat) => {
           if (user) {
-            const other = chat.members?.find((m) => m.id !== user.id);
-            return {
-              ...chat,
-              name: other?.name || chat.name,
-            };
+            if (chat.members?.length === 2) {
+              const other = chat.members.find((m) => m.id !== user.id);
+              return {
+                ...chat,
+                name: other?.name || "Неизвестный пользователь",
+              };
+            }
+            // групповой чат → оставляем оригинальное название
+            return chat;
           }
           return chat;
         });
