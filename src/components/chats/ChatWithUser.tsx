@@ -73,24 +73,26 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         <p className={styles.chatTitle}><strong>{chat.name}</strong></p>
       </div>
 
-      <div className={styles.messages}>
+      <div className={styles.messages} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {messages && messages.length > 0 ? (
-          messages.map((m) => {
-            const isMine = localUserId ? m.user_id === localUserId : false;
-            return (
-              <div
-                key={m.id}
-                className={`${styles.message} ${isMine ? styles.myMessage : styles.otherMessage}`}
-              >
-                <div className={styles.bubble}>
-                  {m.content}
-                  <span className={styles.time}>
-                    {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </span>
+          [...messages]
+            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+            .map((m) => {
+              const isMine = localUserId ? m.user_id === localUserId : false;
+              return (
+                <div
+                  key={m.id}
+                  className={`${styles.message} ${isMine ? styles.myMessage : styles.otherMessage}`}
+                >
+                  <div className={styles.bubble}>
+                    {m.content}
+                    <span className={styles.time}>
+                      {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            })
         ) : (
           <p className={styles.emptyMessages}>Сообщений пока нет</p>
         )}
