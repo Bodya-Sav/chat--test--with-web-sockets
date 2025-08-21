@@ -5,29 +5,27 @@ import { useNavigate } from "react-router-dom";
 import styles from "../styles/MainPage.module.css";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import ListOfUsers from "../components/ListOfUsers";
-import ChatWithUser from "../components/ChatWithUser";
-import ListOfChats from "../components/ListOfChats";
+import ListOfUsers from "../components/users/ListOfUsers";
+import ChatWithUser from "../components/chats/ChatWithUser";
+import ListOfChats from "../components/chats/ListOfChats";
+import { MessageCirclePlus } from "lucide-react";
+import CustomDropdownMenu from "../components/CustomDropdownMenu";
 
 export default function MainPage() {
   const navigate = useNavigate();
   const { user, setUser } = useUser();
   const [users, setUsers] = useState<User[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
-
   const [hovered, setHovered] = useState(false);
   const [showList, setShowList] = useState(false);
-
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
 
-  // Загружаем пользователей и чаты при монтировании страницы
   useEffect(() => {
     const loadUsers = async () => {
       try {
         const data = await Api.getUsers();
         setUsers(data);
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      } catch (error) {
+      } catch {
         toast.error("Не удалось загрузить пользователей");
       }
     };
@@ -36,8 +34,7 @@ export default function MainPage() {
       try {
         const data = await Api.getChats();
         setChats(data);
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      } catch (error) {
+      } catch {
         toast.error("Не удалось загрузить чаты");
       }
     };
@@ -52,15 +49,12 @@ export default function MainPage() {
       toast.success(`Чат с ${u.name || u.email} создан`);
       setChats((prev) => [...prev, newChat]);
       setShowList(false);
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (err) {
+    } catch {
       toast.error("Не удалось создать чат");
     }
   };
 
-  const handleCreateChat = () => {
-    setShowList(true);
-  }
+  const handleCreateChat = () => setShowList(true);
 
   const handleLogout = () => {
     Api.logout();
@@ -77,14 +71,17 @@ export default function MainPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
     >
       <div className={styles.container}>
-        {/* Левая секция: список чатов и создание */}
         <div
           className={styles.sidebar}
           onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}>
-          <p className={styles.username}>
-            <strong>{user?.username || "unknown"}</strong>
-          </p>
+          onMouseLeave={() => setHovered(false)}
+        >
+          <div className={styles.sidebartop}>
+            <CustomDropdownMenu onLogout={handleLogout} />
+            <p className={styles.username}>
+              <strong>{user?.username}</strong>
+            </p>
+          </div>
 
           {showList ? (
             <ListOfUsers
@@ -95,50 +92,39 @@ export default function MainPage() {
           ) : (
             <div className={styles.chatscontainer}>
               {chats.length > 0 ? (
-                <>
-                  <ListOfChats
-                    chats={chats}
-                    onSelectUser={(chat) => setSelectedChat(chat)}
-                  />
-
-                  <motion.button
-                    className={styles.addchat}
-                    onClick={handleCreateChat}
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={hovered ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.8 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    ➕</motion.button>
-                </>
+                <ListOfChats
+                  chats={chats}
+                  selectedChatId={selectedChat?.id} // передаем id выбранного чата
+                  onSelectUser={(chat) => setSelectedChat(chat)}
+                />
               ) : (
                 <>
                   <p>чатов еще нет</p>
-                  <motion.button
-                    className={styles.addchat}
-                    onClick={handleCreateChat}
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={
-                      hovered ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.8 }
-                    }
-                    transition={{ duration: 0.3 }}
-                  >
-                    ➕
-                  </motion.button>
                 </>
               )}
             </div>
           )}
 
-          <div className={styles.sidebarBottom}>
-            <button
-              className={styles.logoutBtn}
-              onClick={handleLogout}
-            >
-              Выйти
-            </button>
-          </div>
+          {!showList && (
+            <div className={styles.sidebarBottom}>
+              <motion.button
+                className={styles.addChatFab}
+                onClick={handleCreateChat}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={
+                  hovered
+                    ? { opacity: 1, scale: 1 }
+                    : { opacity: 0, scale: 0.8 }
+                }
+                transition={{ duration: 0.3 }}
+              >
+                <MessageCirclePlus />
+              </motion.button>
+            </div>
+          )}
+
         </div>
-        {/* Правая секция: чат */}
+
         <div className={styles.chatSection}>
           {selectedChat ? (
             <ChatWithUser chat={selectedChat} />
@@ -146,7 +132,7 @@ export default function MainPage() {
             <p>Выберите чат слева</p>
           )}
         </div>
-      </div >
-    </motion.div >
+      </div>
+    </motion.div>
   );
 }

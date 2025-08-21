@@ -1,5 +1,5 @@
-import { type User } from "../../service/api";
-import styles from "../styles/MainPage.module.css";
+import { type User } from "../../../service/api";
+import styles from "../../styles/MainPage.module.css";
 
 interface UserCellProps {
   user: User;

@@ -19,9 +19,9 @@ export default function App() {
               duration={3000}
               toastOptions={{
                 style: {
-                  background: "#f9aaaaff",   // фон
-                  color: "#e20f0fff",        // текст
-                  borderRadius: "10px",    // скругления
+                  background: "#f9aaaaff",
+                  color: "#e20f0fff",
+                  borderRadius: "10px",
                   padding: "12px 16px",
                   fontSize: "14px",
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
