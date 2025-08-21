@@ -21,44 +21,58 @@ export default function MainPage() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
 
   useEffect(() => {
-    const loadUsers = async () => {
+    const loadData = async () => {
       try {
-        const data = await Api.getUsers();
-        setUsers(data);
-      } catch {
-        toast.error("Не удалось загрузить пользователей");
-      }
-    };
+        // 1️⃣ Убедимся, что пользователь загружен
+        let currentUser = user;
+        if (!currentUser && Api.getToken()) {
+          currentUser = await Api.getMe();
+        }
 
-    const loadChats = async () => {
-      try {
-        const data = await Api.getChats();
+        if (!currentUser) {
+          toast.error("Не удалось получить данные пользователя");
+          return;
+        }
 
-        const normalized = (Array.isArray(data) ? data : []).map((chat) => {
-          if (user) {
-            if (chat.members?.length === 2) {
-              const other = chat.members.find((m) => m.id !== user.id);
-              return {
-                ...chat,
-                name: other?.name || "Неизвестный пользователь",
-              };
-            }
-            // групповой чат → оставляем оригинальное название
-            return chat;
-          }
-          return chat;
-        });
+        // 2️⃣ Загружаем список пользователей
+        let allUsers: User[] = [];
+        try {
+          allUsers = await Api.getUsers();
+        } catch {
+          toast.error("Не удалось загрузить пользователей");
+        }
+        setUsers(allUsers);
 
-        setChats(normalized);
-      } catch {
-        toast.error("Не удалось загрузить чаты");
+        // 3️⃣ Загружаем список чатов
+        let allChats: Chat[] = [];
+        try {
+          const data = await Api.getChats();
+          const normalized = (Array.isArray(data) ? data : []).map((chat) => {
+            // Если групповой чат или нет участников — оставляем оригинальное имя
+            if (chat.members?.length !== 2) return chat;
+
+            // Находим собеседника
+            const other = chat.members.find((m) => m.name !== currentUser.name);
+            return {
+              ...chat,
+              name: other?.name || "Неизвестный пользователь",
+            };
+          });
+          allChats = normalized;
+        } catch {
+          toast.error("Не удалось загрузить чаты");
+        }
+        setChats(allChats);
+
+      } catch (err) {
+        console.error("Ошибка загрузки данных MainPage:", err);
         setChats([]);
+        setUsers([]);
       }
     };
 
-    loadUsers();
-    loadChats();
-  }, []);
+    loadData();
+  }, [user]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
