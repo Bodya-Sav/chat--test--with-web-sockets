@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { type Chat, Api, type Message as ApiMessage } from "../../../service/api";
 import styles from "../../styles/MainPage.module.css";
-import { SendHorizontal } from "lucide-react";
+import { SendHorizontal, ChevronDown } from "lucide-react";
 
 interface ChatWithUserProps {
   chat: Chat;
@@ -10,26 +10,63 @@ interface ChatWithUserProps {
 export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [input, setInput] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
-  // Получаем user из localStorage и парсим
+  const inputRef = useRef<HTMLInputElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const limit = 250;
+  const offsetRef = useRef(0);
+
   const localUser = localStorage.getItem("user");
   const parsedUser = localUser ? JSON.parse(localUser) : null;
   const localUserId = parsedUser?.user_id;
 
-  // Загрузка сообщений с сервера при смене чата
   useEffect(() => {
-    const loadMessages = async () => {
-      try {
-        const data = await Api.getChatMessages(chat.id);
-        setMessages(Array.isArray(data) ? data : []);
-      } catch {
-        setMessages([]);
+    const handler = (e: KeyboardEvent) => {
+      if (e.key.length === 1 && inputRef.current && document.activeElement !== inputRef.current) {
+        inputRef.current.focus();
+        setInput((prev) => prev + e.key);
+        e.preventDefault();
       }
     };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  useEffect(() => {
+    setMessages([]);
+    offsetRef.current = 0;
+    setHasMore(true);
     loadMessages();
   }, [chat.id]);
+
+  const loadMessages = async () => {
+    if (!hasMore || loading || !messagesContainerRef.current) return;
+
+    setLoading(true);
+    try {
+      const container = messagesContainerRef.current;
+      const scrollHeightBefore = container.scrollHeight;
+      const scrollTopBefore = container.scrollTop;
+
+      const data = await Api.getChatMessages(chat.id, limit, offsetRef.current);
+      if (data.length < limit) setHasMore(false);
+      offsetRef.current += data.length;
+
+      setMessages((prev) => [...data, ...prev]);
+
+      setTimeout(() => {
+        const scrollHeightAfter = container.scrollHeight;
+        container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
+      }, 0);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSend = () => {
     if (!input.trim() || !localUserId) return;
@@ -44,27 +81,28 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
 
     setMessages((prev) => [...prev, newMsg]);
     setInput("");
+
+    scrollToBottom();
   };
 
-  // Фокус на input при любой печати
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key.length === 1 && inputRef.current) {
-        if (document.activeElement !== inputRef.current) {
-          inputRef.current.focus();
-          setInput((prev) => prev + e.key);
-          e.preventDefault();
-        }
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+  const handleScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
 
-  // Скролл к последнему сообщению
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (container.scrollTop < 50) loadMessages();
+
+    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+    setShowScrollDown(!atBottom);
+  };
+
+  const scrollToBottom = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: "smooth",
+    });
+  };
 
   return (
     <div className={styles.chatWindow}>
@@ -73,8 +111,15 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         <p className={styles.chatTitle}><strong>{chat.name}</strong></p>
       </div>
 
-      <div className={styles.messages} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {messages && messages.length > 0 ? (
+      <div
+        ref={messagesContainerRef}
+        className={styles.messages}
+        style={{ display: "flex", flexDirection: "column", gap: "8px", position: "relative", overflowY: "auto" }}
+        onScroll={handleScroll}
+      >
+        {loading && <div className={styles.loader}>Загрузка...</div>}
+
+        {messages.length > 0 ? (
           [...messages]
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
             .map((m) => {
@@ -96,7 +141,35 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         ) : (
           <p className={styles.emptyMessages}>Сообщений пока нет</p>
         )}
-        <div ref={messagesEndRef} />
+
+
+      </div>
+
+      {/** Кнопка скролла вниз */}
+      <div
+        style={{
+          position: "absolute", // фиксируем относительно контейнера
+          bottom: "10%",
+          left: "60%",
+
+          cursor: "pointer",
+          background: "#fff",
+
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '30px',
+          height: '30px',
+          borderRadius: "50%",
+
+          boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+          zIndex: 10,
+          opacity: showScrollDown ? 1 : 0,
+          transition: "opacity 0.3s ease", // анимация появления/исчезновения
+        }}
+        onClick={scrollToBottom}
+      >
+        <ChevronDown size={24} />
       </div>
 
       <div className={styles.inputArea}>

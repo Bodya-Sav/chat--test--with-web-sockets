@@ -268,7 +268,10 @@
 .message {
   display: flex;
   flex-direction: column;
-  max-width: 70%;
+  max-width: 80%; /* максимум ширины блока относительно контейнера */
+  width: fit-content; /* блок подстраивается под контент */
+  word-break: break-word; /* перенос длинных слов */
+  overflow-wrap: break-word; /* дополнительный перенос */
 }
 
 .myMessage {
@@ -290,10 +293,11 @@
 .bubble {
   padding: 8px 12px;
   border-radius: 12px;
-  background: #e5e7eb; /* светло-серый для чужих */
-  position: relative;
+  background: #e5e7eb;
   display: inline-block;
-  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap; /* сохраняет переносы и пробелы */
 }
 
 .myMessage .bubble {
@@ -348,4 +352,23 @@
 .sendBtn:hover {
   transition: transform 0.5s;
   transform: scale(1.2);
+}
+
+.loader {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px;
+  color: #555;
+  font-size: 14px;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }

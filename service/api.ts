@@ -180,7 +180,7 @@ export class Api {
 
   static async getChatMessages(
     id: string,
-    limit = 50,
+    limit = 20,
     offset = 0
   ): Promise<Message[]> {
     const token = Api.getToken();
