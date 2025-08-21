@@ -55,7 +55,7 @@ export default function MainPage() {
 
     loadUsers();
     loadChats();
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
