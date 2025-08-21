@@ -14,9 +14,8 @@ interface RegisterPayload {
 
 export interface User {
   email: string;
-  id?: string;
-  name?: string;
-  username?: string;
+  id: string;
+  name: string;
 }
 
 export interface Chat {

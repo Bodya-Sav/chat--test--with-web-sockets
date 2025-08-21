@@ -121,7 +121,7 @@ export default function MainPage() {
           <div className={styles.sidebartop}>
             <CustomDropdownMenu onLogout={handleLogout} />
             <p className={styles.username}>
-              <strong>{user?.username}</strong>
+              <strong>{user?.name}</strong>
             </p>
           </div>
 
