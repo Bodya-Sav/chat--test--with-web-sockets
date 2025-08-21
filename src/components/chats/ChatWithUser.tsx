@@ -16,7 +16,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [newMessagesCount, setNewMessagesCount] = useState(0);
   const [wsStatus, setWsStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
-  const [isTyping, setIsTyping] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -25,8 +25,8 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const limit = 50;
   const reconnectTimeoutRef = useRef<number | null>(null);
   const isUnmountingRef = useRef(false);
+
   const stickToBottomRef = useRef(true);
-  const typingTimeoutRef = useRef<number | null>(null);
 
   const localUser = localStorage.getItem("user");
   const parsedUser = localUser ? JSON.parse(localUser) : null;
@@ -34,7 +34,6 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const token = parsedUser?.token as string | undefined;
 
   const BOTTOM_GAP = 12;
-
   const isAtBottom = (el: HTMLElement) =>
     el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_GAP;
 
@@ -94,39 +93,46 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     ws.onclose = (event) => {
       setWsStatus('disconnected');
       if (!isUnmountingRef.current && event.code !== 1000 && event.code !== 1001) {
-        reconnectTimeoutRef.current = setTimeout(() => { if (!isUnmountingRef.current) createWebSocket(); }, 3000) as unknown as number;
+        reconnectTimeoutRef.current = setTimeout(() => {
+          if (!isUnmountingRef.current) createWebSocket();
+        }, 3000) as unknown as number;
       }
     };
 
-    ws.onerror = () => { setWsStatus('disconnected'); };
+    ws.onerror = () => setWsStatus('disconnected');
 
     ws.onmessage = (event) => {
       if (isUnmountingRef.current) return;
       try {
-        const msg = JSON.parse(event.data);
+        const data = JSON.parse(event.data);
 
-        if (msg.type === 'message') {
+        if (data.content) {
+          const msg: ApiMessage = data;
           const container = messagesContainerRef.current;
           const wasAtBottom = container ? isAtBottom(container) : true;
           const isMine = localUserId ? msg.user_id === localUserId : false;
 
-          setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]);
+          setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
 
           if (wasAtBottom || isMine || stickToBottomRef.current) {
             stickToBottomRef.current = true;
             scheduleScrollToBottom();
           } else {
-            setNewMessagesCount((c) => c + 1);
+            setNewMessagesCount(c => c + 1);
           }
-
-          setIsTyping(false);
+        } else if (data.isTyping !== undefined) {
+          const { user_id, isTyping } = data;
+          setTypingUsers(prev => {
+            if (isTyping) {
+              return prev.includes(user_id) ? prev : [...prev, user_id];
+            } else {
+              return prev.filter(u => u !== user_id);
+            }
+          });
         }
-
-        if (msg.type === 'typing' && msg.user_id !== localUserId) {
-          setIsTyping(msg.isTyping);
-        }
-
-      } catch (error) { console.error("WS parse error:", error); }
+      } catch (error) {
+        console.error("WebSocket message error:", error);
+      }
     };
   };
 
@@ -135,7 +141,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     const handler = (e: KeyboardEvent) => {
       if (e.key.length === 1 && inputRef.current && document.activeElement !== inputRef.current) {
         inputRef.current.focus();
-        setInput((prev) => prev + e.key);
+        setInput(prev => prev + e.key);
         e.preventDefault();
       }
     };
@@ -155,18 +161,17 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
       const data = await Api.getChatMessages(chat.id, limit, offsetRef.current);
       if (data.length < limit) setHasMore(false);
       offsetRef.current += data.length;
-
-      setMessages((prev) => [...data, ...prev]);
+      setMessages(prev => [...data, ...prev]);
 
       setTimeout(() => {
         const scrollHeightAfter = container.scrollHeight;
         container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
       }, 0);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+    } catch (err) {
+      console.error(err);
+    } finally { setLoading(false); }
   };
 
-  /** Первичная загрузка + WebSocket */
   useEffect(() => {
     if (!chat.id || !token) return;
     isUnmountingRef.current = false;
@@ -176,9 +181,9 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     return () => { isUnmountingRef.current = true; closeWebSocket(); };
   }, [chat.id, token]);
 
-  useEffect(() => {
-    if (stickToBottomRef.current) scheduleScrollToBottom();
-  }, [messages.length]);
+  useEffect(() => { return () => { isUnmountingRef.current = true; closeWebSocket(); }; }, []);
+
+  useEffect(() => { if (stickToBottomRef.current) scheduleScrollToBottom(); }, [messages.length]);
 
   /** Отправка сообщений через WebSocket */
   const handleSend = () => {
@@ -186,30 +191,14 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     stickToBottomRef.current = true;
     wsRef.current.send(JSON.stringify({ type: 'message', content: input }));
     setInput("");
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
-    }
+    wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
   };
 
-  /** Отправка события "печатает" с автоотключением через 1 секунду */
-  const handleInputChange = (value: string) => {
-    setInput(value);
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: value.length > 0 }));
-    }
-
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
-    if (value.length > 0) {
-      typingTimeoutRef.current = window.setTimeout(() => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
-        }
-      }, 1000);
-    }
-  };
+  /** Индикатор набора текста */
+  useEffect(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: input.length > 0 }));
+  }, [input]);
 
   const handleScroll = () => {
     const container = messagesContainerRef.current;
@@ -221,22 +210,23 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     if (atBottom) setNewMessagesCount(0);
   };
 
+  /** Анимация точек "печатает..." */
+  const [dots, setDots] = useState("");
+  useEffect(() => {
+    if (typingUsers.length === 0) return setDots("");
+    const interval = setInterval(() => setDots(prev => prev.length < 3 ? prev + "." : ""), 500);
+    return () => clearInterval(interval);
+  }, [typingUsers]);
+
   return (
     <div className={styles.chatWindow}>
       <div className={styles.chatbar}>
         <div className={styles.avatar}>{chat.name?.[0]?.toUpperCase()}</div>
         <p className={styles.chatTitle}>
           <strong>{chat.name}</strong>
-          {isTyping && (
-            <span className={styles.typingIndicator}>
-              печатает
-              <span className={styles.dot}>.</span>
-              <span className={styles.dot}>.</span>
-              <span className={styles.dot}>.</span>
-            </span>
-          )}
           {wsStatus === 'connecting' && <span style={{ color: '#ffa500', fontSize: '12px', marginLeft: '8px' }}>подключение...</span>}
           {wsStatus === 'disconnected' && <span style={{ color: '#ff4444', fontSize: '12px', marginLeft: '8px' }}>нет связи</span>}
+          {typingUsers.length > 0 && <span style={{ fontSize: '12px', marginLeft: '8px', color: '#888' }}>печатает{dots}</span>}
         </p>
       </div>
 
@@ -247,26 +237,20 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         onScroll={handleScroll}
       >
         {loading && <div className={styles.loader}>Загрузка...</div>}
-
         {messages.length > 0 ? (
-          messages
-            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-            .map((m) => {
+          messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+            .map(m => {
               const isMine = localUserId ? m.user_id === localUserId : false;
               return (
                 <div key={m.id} className={`${styles.message} ${isMine ? styles.myMessage : styles.otherMessage}`}>
                   <div className={styles.bubble}>
                     {m.content}
-                    <span className={styles.time}>
-                      {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
+                    <span className={styles.time}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                   </div>
                 </div>
               );
             })
-        ) : (
-          <p className={styles.emptyMessages}>Сообщений пока нет</p>
-        )}
+        ) : <p className={styles.emptyMessages}>Сообщений пока нет</p>}
       </div>
 
       {newMessagesCount > 0 && (
@@ -324,7 +308,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
           ref={inputRef}
           className={styles.messageInput}
           value={input}
-          onChange={(e) => handleInputChange(e.target.value)}
+          onChange={(e) => setInput(e.target.value)}
           placeholder={wsStatus === 'connected' ? "Сообщение" : "Подключение..."}
           disabled={wsStatus !== 'connected'}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
