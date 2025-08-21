@@ -28,8 +28,9 @@ export interface Chat {
 
 export interface Message {
   id: string;
-  sender: string;
-  text: string;
+  chat_id: string;
+  user_id: string;
+  content: string;
   created_at: string;
 }
 

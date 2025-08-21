@@ -23,7 +23,6 @@ export default function MainPage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        // 1️⃣ Убедимся, что пользователь загружен
         let currentUser = user;
         if (!currentUser && Api.getToken()) {
           currentUser = await Api.getMe();
@@ -34,7 +33,6 @@ export default function MainPage() {
           return;
         }
 
-        // 2️⃣ Загружаем список пользователей
         let allUsers: User[] = [];
         try {
           allUsers = await Api.getUsers();
@@ -43,15 +41,12 @@ export default function MainPage() {
         }
         setUsers(allUsers);
 
-        // 3️⃣ Загружаем список чатов
         let allChats: Chat[] = [];
         try {
           const data = await Api.getChats();
           const normalized = (Array.isArray(data) ? data : []).map((chat) => {
-            // Если групповой чат или нет участников — оставляем оригинальное имя
             if (chat.members?.length !== 2) return chat;
 
-            // Находим собеседника
             const other = chat.members.find((m) => m.name !== currentUser.name);
             return {
               ...chat,
@@ -86,24 +81,21 @@ export default function MainPage() {
 
   const handleSelectUser = async (u: User) => {
     try {
-      // ищем чат с этим пользователем
       const existingChat = chats.find((chat) =>
         chat.members?.some((m) => m.id === u.id)
       );
 
       if (existingChat) {
-        // если уже есть → просто открываем
         setSelectedChat(existingChat);
         toast.info(`Чат с ${u.name || u.email} уже существует`);
         setShowList(false);
         return;
       }
 
-      // если чата нет → создаём
       const newChat = await Api.createNewChatWithUser(u.name!, u.id!);
       toast.success(`Чат с ${u.name || u.email} создан`);
       setChats((prev) => [...prev, newChat]);
-      setSelectedChat(newChat); // сразу открываем новый
+      setSelectedChat(newChat);
       setShowList(false);
     } catch {
       toast.error("Не удалось создать чат");
@@ -150,7 +142,7 @@ export default function MainPage() {
               {chats.length > 0 ? (
                 <ListOfChats
                   chats={chats}
-                  selectedChatId={selectedChat?.id} // передаем id выбранного чата
+                  selectedChatId={selectedChat?.id}
                   onSelectUser={(chat) => setSelectedChat(chat)}
                 />
               ) : (

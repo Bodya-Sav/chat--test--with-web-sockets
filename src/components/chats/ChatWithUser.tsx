@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { type Chat } from "../../../service/api";
+import { type Chat, Api, type Message as ApiMessage } from "../../../service/api";
 import styles from "../../styles/MainPage.module.css";
 import { SendHorizontal } from "lucide-react";
 
@@ -7,26 +7,38 @@ interface ChatWithUserProps {
   chat: Chat;
 }
 
-interface Message {
-  id: string;
-  sender: string;
-  text: string;
-  created_at: string;
-}
-
 export default function ChatWithUser({ chat }: ChatWithUserProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  // Получаем user из localStorage и парсим
+  const localUser = localStorage.getItem("user");
+  const parsedUser = localUser ? JSON.parse(localUser) : null;
+  const localUserId = parsedUser?.user_id;
 
-    const newMsg: Message = {
+  // Загрузка сообщений с сервера при смене чата
+  useEffect(() => {
+    const loadMessages = async () => {
+      try {
+        const data = await Api.getChatMessages(chat.id);
+        setMessages(Array.isArray(data) ? data : []);
+      } catch {
+        setMessages([]);
+      }
+    };
+    loadMessages();
+  }, [chat.id]);
+
+  const handleSend = () => {
+    if (!input.trim() || !localUserId) return;
+
+    const newMsg: ApiMessage = {
       id: Date.now().toString(),
-      sender: "Вы",
-      text: input,
+      chat_id: chat.id,
+      user_id: localUserId,
+      content: input,
       created_at: new Date().toISOString(),
     };
 
@@ -49,7 +61,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Скролл к последнему сообщению при изменении messages
+  // Скролл к последнему сообщению
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -62,17 +74,16 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
       </div>
 
       <div className={styles.messages}>
-        {messages.length > 0 ? (
+        {messages && messages.length > 0 ? (
           messages.map((m) => {
-            const isMine = m.sender === "Вы";
+            const isMine = localUserId ? m.user_id === localUserId : false;
             return (
               <div
                 key={m.id}
                 className={`${styles.message} ${isMine ? styles.myMessage : styles.otherMessage}`}
               >
-                {!isMine && <div className={styles.senderName}>{m.sender}</div>}
                 <div className={styles.bubble}>
-                  {m.text}
+                  {m.content}
                   <span className={styles.time}>
                     {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
@@ -83,7 +94,6 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         ) : (
           <p className={styles.emptyMessages}>Сообщений пока нет</p>
         )}
-        {/* Пустой div для скролла к концу */}
         <div ref={messagesEndRef} />
       </div>
 
