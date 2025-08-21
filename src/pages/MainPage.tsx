@@ -33,9 +33,10 @@ export default function MainPage() {
     const loadChats = async () => {
       try {
         const data = await Api.getChats();
-        setChats(data);
+        setChats(Array.isArray(data) ? data : []);
       } catch {
         toast.error("Не удалось загрузить чаты");
+        setChats([]);
       }
     };
 
@@ -45,9 +46,24 @@ export default function MainPage() {
 
   const handleSelectUser = async (u: User) => {
     try {
+      // ищем чат с этим пользователем
+      const existingChat = chats.find((chat) =>
+        chat.members?.some((m) => m.id === u.id)
+      );
+
+      if (existingChat) {
+        // если уже есть → просто открываем
+        setSelectedChat(existingChat);
+        toast.info(`Чат с ${u.name || u.email} уже существует`);
+        setShowList(false);
+        return;
+      }
+
+      // если чата нет → создаём
       const newChat = await Api.createNewChatWithUser(u.name!, u.id!);
       toast.success(`Чат с ${u.name || u.email} создан`);
       setChats((prev) => [...prev, newChat]);
+      setSelectedChat(newChat); // сразу открываем новый
       setShowList(false);
     } catch {
       toast.error("Не удалось создать чат");
@@ -98,9 +114,9 @@ export default function MainPage() {
                   onSelectUser={(chat) => setSelectedChat(chat)}
                 />
               ) : (
-                <>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <p>чатов еще нет</p>
-                </>
+                </div>
               )}
             </div>
           )}
