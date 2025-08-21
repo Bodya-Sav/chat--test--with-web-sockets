@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { type Chat, type Message as ApiMessage } from "../../../service/api";
+import { type Chat, Api, type Message as ApiMessage } from "../../../service/api";
 import styles from "../../styles/MainPage.module.css";
 import { SendHorizontal, ChevronDown } from "lucide-react";
 import { BASE_URL } from "../../consts/config";
@@ -11,18 +11,22 @@ interface ChatWithUserProps {
 export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const offsetRef = useRef(0);
+  const limit = 50;
 
   const localUser = localStorage.getItem("user");
   const parsedUser = localUser ? JSON.parse(localUser) : null;
   const localUserId = parsedUser?.user_id;
-  const token = parsedUser?.token; // берём токен из localStorage
+  const token = parsedUser?.token;
 
-  // Фокус на input при печати
+  /** Фокус на input при печати */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key.length === 1 && inputRef.current && document.activeElement !== inputRef.current) {
@@ -35,9 +39,42 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Подключение WebSocket при смене чата
+  /** Подгрузка старых сообщений */
+  const loadMessages = async () => {
+    if (!hasMore || loading || !messagesContainerRef.current) return;
+    setLoading(true);
+    try {
+      const container = messagesContainerRef.current;
+      const scrollHeightBefore = container.scrollHeight;
+      const scrollTopBefore = container.scrollTop;
+
+      const data = await Api.getChatMessages(chat.id, limit, offsetRef.current);
+      if (data.length < limit) setHasMore(false);
+      offsetRef.current += data.length;
+
+      setMessages((prev) => [...data, ...prev]);
+
+      // Сохраняем текущую позицию скролла
+      setTimeout(() => {
+        const scrollHeightAfter = container.scrollHeight;
+        container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
+      }, 0);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** WebSocket подключение для новых сообщений */
   useEffect(() => {
     if (!chat.id || !token) return;
+
+    // Сброс
+    setMessages([]);
+    offsetRef.current = 0;
+    setHasMore(true);
+    loadMessages();
 
     const ws = new WebSocket(`${BASE_URL}/ws?token=${token}&chat_id=${chat.id}`);
     wsRef.current = ws;
@@ -49,7 +86,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     ws.onmessage = (event) => {
       const msg: ApiMessage = JSON.parse(event.data);
       setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev; // проверка по уникальному id
+        if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
       scrollToBottom();
@@ -58,17 +95,21 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     return () => ws.close();
   }, [chat.id, token]);
 
+  /** Отправка сообщений через WebSocket */
   const handleSend = () => {
     if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
     wsRef.current.send(JSON.stringify({ content: input }));
     setInput("");
-    // убираем локальное добавление сообщения
   };
 
+  /** Скролл и кнопка вниз */
   const handleScroll = () => {
     const container = messagesContainerRef.current;
     if (!container) return;
+
+    if (container.scrollTop < 50) loadMessages();
+
     const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
     setShowScrollDown(!atBottom);
   };
@@ -77,10 +118,7 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     const container = messagesContainerRef.current;
     if (!container) return;
     requestAnimationFrame(() => {
-      container.scrollTo({
-        top: container.scrollHeight,
-        behavior: "smooth",
-      });
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
     });
   };
 
@@ -97,16 +135,15 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         style={{ display: "flex", flexDirection: "column", gap: "8px", position: "relative", overflowY: "auto" }}
         onScroll={handleScroll}
       >
+        {loading && <div className={styles.loader}>Загрузка...</div>}
+
         {messages.length > 0 ? (
           messages
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
             .map((m) => {
               const isMine = localUserId ? m.user_id === localUserId : false;
               return (
-                <div
-                  key={m.id}
-                  className={`${styles.message} ${isMine ? styles.myMessage : styles.otherMessage}`}
-                >
+                <div key={m.id} className={`${styles.message} ${isMine ? styles.myMessage : styles.otherMessage}`}>
                   <div className={styles.bubble}>
                     {m.content}
                     <span className={styles.time}>
