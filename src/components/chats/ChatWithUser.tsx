@@ -25,8 +25,8 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const limit = 50;
   const reconnectTimeoutRef = useRef<number | null>(null);
   const isUnmountingRef = useRef(false);
-
   const stickToBottomRef = useRef(true);
+  const typingTimeoutRef = useRef<number | null>(null);
 
   const localUser = localStorage.getItem("user");
   const parsedUser = localUser ? JSON.parse(localUser) : null;
@@ -191,13 +191,27 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     stickToBottomRef.current = true;
     wsRef.current.send(JSON.stringify({ type: 'message', content: input }));
     setInput("");
-    wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
   };
 
-  /** Индикатор набора текста */
+  /** Индикатор набора текста с автоотключением через 2 сек */
   useEffect(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
     wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: input.length > 0 }));
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    if (input.length > 0) {
+      typingTimeoutRef.current = setTimeout(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
+        }
+      }, 1000);
+    }
+
+    return () => { if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current); };
   }, [input]);
 
   const handleScroll = () => {
@@ -211,12 +225,6 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   };
 
   /** Анимация точек "печатает..." */
-  const [dots, setDots] = useState("");
-  useEffect(() => {
-    if (typingUsers.length === 0) return setDots("");
-    const interval = setInterval(() => setDots(prev => prev.length < 3 ? prev + "." : ""), 500);
-    return () => clearInterval(interval);
-  }, [typingUsers]);
 
   return (
     <div className={styles.chatWindow}>
@@ -226,7 +234,18 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
           <strong>{chat.name}</strong>
           {wsStatus === 'connecting' && <span style={{ color: '#ffa500', fontSize: '12px', marginLeft: '8px' }}>подключение...</span>}
           {wsStatus === 'disconnected' && <span style={{ color: '#ff4444', fontSize: '12px', marginLeft: '8px' }}>нет связи</span>}
-          {typingUsers.length > 0 && <span style={{ fontSize: '12px', marginLeft: '8px', color: '#888' }}>печатает{dots}</span>}
+          {
+            typingUsers.length > 0 && (
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                <span className={styles.typingIndicator}>
+                  <span className={styles.typingDot}></span>
+                  <span className={styles.typingDot}></span>
+                  <span className={styles.typingDot}></span>
+                </span>
+                <span>печатает</span>
+              </div>
+            )
+          }
         </p>
       </div>
 
