@@ -1,1 +1,1 @@
-export const BASE_URL = "http://devion.ddns.net/api";
+export const BASE_URL = "http://api.devion.online/api";
