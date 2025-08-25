@@ -1,0 +1,22 @@
+version: "3.9"
+
+networks:
+  global_net:
+    external: true
+
+services:
+  site_blue:
+    container_name: site_blue
+    build: .
+    expose:
+      - "3000"
+    networks:
+      - global_net
+
+  site_green:
+    container_name: site_green
+    build: .
+    expose:
+      - "3000"
+    networks:
+      - global_net

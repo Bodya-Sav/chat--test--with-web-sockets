@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { type Chat, Api, type Message as ApiMessage } from "../../../service/api";
+import {
+  type Chat,
+  Api,
+  type Message as ApiMessage,
+} from "../../../service/api";
 import styles from "../../styles/MainPage.module.css";
 import { SendHorizontal, ChevronDown } from "lucide-react";
 import { BASE_URL } from "../../consts/config";
@@ -15,7 +19,9 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const [hasMore, setHasMore] = useState(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [newMessagesCount, setNewMessagesCount] = useState(0);
-  const [wsStatus, setWsStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [wsStatus, setWsStatus] = useState<
+    "disconnected" | "connecting" | "connected"
+  >("disconnected");
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -59,14 +65,21 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   const closeWebSocket = () => {
     if (wsRef.current) {
       if (wsRef.current.readyState === WebSocket.OPEN) {
-        try { wsRef.current.send(JSON.stringify({ type: 'disconnect' })); } catch { /* empty */ }
+        try {
+          wsRef.current.send(JSON.stringify({ type: "disconnect" }));
+        } catch {
+          /* empty */
+        }
       }
       wsRef.current.onopen = null;
       wsRef.current.onclose = null;
       wsRef.current.onerror = null;
       wsRef.current.onmessage = null;
-      if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
-        wsRef.current.close(1000, 'Component unmounting');
+      if (
+        wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING
+      ) {
+        wsRef.current.close(1000, "Component unmounting");
       }
       wsRef.current = null;
     }
@@ -74,32 +87,41 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-    setWsStatus('disconnected');
+    setWsStatus("disconnected");
   };
 
   const createWebSocket = () => {
     if (!chat.id || !token || isUnmountingRef.current) return;
     closeWebSocket();
-    setWsStatus('connecting');
+    setWsStatus("connecting");
 
-    const ws = new WebSocket(`${BASE_URL}/ws?token=${token}&chat_id=${chat.id}`);
+    const ws = new WebSocket(
+      `${BASE_URL}/ws?token=${token}&chat_id=${chat.id}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
-      if (isUnmountingRef.current) { ws.close(1000, 'Component unmounting'); return; }
-      setWsStatus('connected');
+      if (isUnmountingRef.current) {
+        ws.close(1000, "Component unmounting");
+        return;
+      }
+      setWsStatus("connected");
     };
 
     ws.onclose = (event) => {
-      setWsStatus('disconnected');
-      if (!isUnmountingRef.current && event.code !== 1000 && event.code !== 1001) {
+      setWsStatus("disconnected");
+      if (
+        !isUnmountingRef.current &&
+        event.code !== 1000 &&
+        event.code !== 1001
+      ) {
         reconnectTimeoutRef.current = setTimeout(() => {
           if (!isUnmountingRef.current) createWebSocket();
         }, 3000) as unknown as number;
       }
     };
 
-    ws.onerror = () => setWsStatus('disconnected');
+    ws.onerror = () => setWsStatus("disconnected");
 
     ws.onmessage = (event) => {
       if (isUnmountingRef.current) return;
@@ -112,21 +134,23 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
           const wasAtBottom = container ? isAtBottom(container) : true;
           const isMine = localUserId ? msg.user_id === localUserId : false;
 
-          setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
+          setMessages((prev) =>
+            prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
+          );
 
           if (wasAtBottom || isMine || stickToBottomRef.current) {
             stickToBottomRef.current = true;
             scheduleScrollToBottom();
           } else {
-            setNewMessagesCount(c => c + 1);
+            setNewMessagesCount((c) => c + 1);
           }
         } else if (data.isTyping !== undefined) {
           const { user_id, isTyping } = data;
-          setTypingUsers(prev => {
+          setTypingUsers((prev) => {
             if (isTyping) {
               return prev.includes(user_id) ? prev : [...prev, user_id];
             } else {
-              return prev.filter(u => u !== user_id);
+              return prev.filter((u) => u !== user_id);
             }
           });
         }
@@ -139,9 +163,13 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   /** Фокус на input при печати */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key.length === 1 && inputRef.current && document.activeElement !== inputRef.current) {
+      if (
+        e.key.length === 1 &&
+        inputRef.current &&
+        document.activeElement !== inputRef.current
+      ) {
         inputRef.current.focus();
-        setInput(prev => prev + e.key);
+        setInput((prev) => prev + e.key);
         e.preventDefault();
       }
     };
@@ -161,35 +189,60 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
       const data = await Api.getChatMessages(chat.id, limit, offsetRef.current);
       if (data.length < limit) setHasMore(false);
       offsetRef.current += data.length;
-      setMessages(prev => [...data, ...prev]);
+      setMessages((prev) => [...data, ...prev]);
 
       setTimeout(() => {
         const scrollHeightAfter = container.scrollHeight;
-        container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
+        container.scrollTop =
+          scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
       }, 0);
     } catch (err) {
       console.error(err);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     if (!chat.id || !token) return;
     isUnmountingRef.current = false;
-    setMessages([]); setNewMessagesCount(0); offsetRef.current = 0; setHasMore(true); stickToBottomRef.current = true;
-    (async () => { await loadMessages(); scrollToBottom(true); })();
+    setMessages([]);
+    setNewMessagesCount(0);
+    offsetRef.current = 0;
+    setHasMore(true);
+    stickToBottomRef.current = true;
+    (async () => {
+      await loadMessages();
+      scrollToBottom(true);
+    })();
     createWebSocket();
-    return () => { isUnmountingRef.current = true; closeWebSocket(); };
+    return () => {
+      isUnmountingRef.current = true;
+      closeWebSocket();
+    };
   }, [chat.id, token]);
 
-  useEffect(() => { return () => { isUnmountingRef.current = true; closeWebSocket(); }; }, []);
+  useEffect(() => {
+    return () => {
+      isUnmountingRef.current = true;
+      closeWebSocket();
+    };
+  }, []);
 
-  useEffect(() => { if (stickToBottomRef.current) scheduleScrollToBottom(); }, [messages.length]);
+  useEffect(() => {
+    if (stickToBottomRef.current) scheduleScrollToBottom();
+  }, [messages.length]);
 
   /** Отправка сообщений через WebSocket */
   const handleSend = () => {
-    if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (
+      !input.trim() ||
+      !wsRef.current ||
+      wsRef.current.readyState !== WebSocket.OPEN
+    )
+      return;
     stickToBottomRef.current = true;
-    wsRef.current.send(JSON.stringify({ type: 'message', content: input }));
+    wsRef.current.send(JSON.stringify({ type: "message", content: input }));
     setInput("");
   };
 
@@ -197,7 +250,9 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
   useEffect(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: input.length > 0 }));
+    wsRef.current.send(
+      JSON.stringify({ type: "typing", isTyping: input.length > 0 })
+    );
 
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -206,12 +261,16 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
     if (input.length > 0) {
       typingTimeoutRef.current = setTimeout(() => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'typing', isTyping: false }));
+          wsRef.current.send(
+            JSON.stringify({ type: "typing", isTyping: false })
+          );
         }
       }, 1000);
     }
 
-    return () => { if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current); };
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
   }, [input]);
 
   const handleScroll = () => {
@@ -232,44 +291,77 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
         <div className={styles.avatar}>{chat.name?.[0]?.toUpperCase()}</div>
         <div className={styles.chatTitle}>
           <strong>{chat.name}</strong>
-          {wsStatus === 'connecting' && <span style={{ color: '#ffa500', fontSize: '12px', marginLeft: '8px' }}>подключение...</span>}
-          {wsStatus === 'disconnected' && <span style={{ color: '#ff4444', fontSize: '12px', marginLeft: '8px' }}>нет связи</span>}
-          {
-            typingUsers.length > 0 && (
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                <span className={styles.typingIndicator}>
-                  <span className={styles.typingDot}></span>
-                  <span className={styles.typingDot}></span>
-                  <span className={styles.typingDot}></span>
-                </span>
-                <span>печатает</span>
-              </div>
-            )
-          }
+          {wsStatus === "connecting" && (
+            <span
+              style={{ color: "#ffa500", fontSize: "12px", marginLeft: "8px" }}
+            >
+              подключение...
+            </span>
+          )}
+          {wsStatus === "disconnected" && (
+            <span
+              style={{ color: "#ff4444", fontSize: "12px", marginLeft: "8px" }}
+            >
+              нет связи
+            </span>
+          )}
+          {typingUsers.length > 0 && (
+            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+              <span className={styles.typingIndicator}>
+                <span className={styles.typingDot}></span>
+                <span className={styles.typingDot}></span>
+                <span className={styles.typingDot}></span>
+              </span>
+              <span>печатает</span>
+            </div>
+          )}
         </div>
       </div>
 
       <div
         ref={messagesContainerRef}
         className={styles.messages}
-        style={{ display: "flex", flexDirection: "column", gap: "8px", position: "relative", overflowY: "auto" }}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+          position: "relative",
+          overflowY: "auto",
+        }}
         onScroll={handleScroll}
       >
         {loading && <div className={styles.loader}>Загрузка...</div>}
         {messages.length > 0 ? (
-          messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-            .map(m => {
+          messages
+            .sort(
+              (a, b) =>
+                new Date(a.created_at).getTime() -
+                new Date(b.created_at).getTime()
+            )
+            .map((m) => {
               const isMine = localUserId ? m.user_id === localUserId : false;
               return (
-                <div key={m.id} className={`${styles.message} ${isMine ? styles.myMessage : styles.otherMessage}`}>
+                <div
+                  key={m.id}
+                  className={`${styles.message} ${
+                    isMine ? styles.myMessage : styles.otherMessage
+                  }`}
+                >
                   <div className={styles.bubble}>
                     {m.content}
-                    <span className={styles.time}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                    <span className={styles.time}>
+                      {new Date(m.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
                   </div>
                 </div>
               );
             })
-        ) : <p className={styles.emptyMessages}>Сообщений пока нет</p>}
+        ) : (
+          <p className={styles.emptyMessages}>Сообщений пока нет</p>
+        )}
       </div>
 
       {newMessagesCount > 0 && (
@@ -328,14 +420,16 @@ export default function ChatWithUser({ chat }: ChatWithUserProps) {
           className={styles.messageInput}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={wsStatus === 'connected' ? "Сообщение" : "Подключение..."}
-          disabled={wsStatus !== 'connected'}
+          placeholder={
+            wsStatus === "connected" ? "Сообщение" : "Подключение..."
+          }
+          disabled={wsStatus !== "connected"}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
         />
         <button
           className={styles.sendBtn}
           onClick={handleSend}
-          disabled={wsStatus !== 'connected' || !input.trim()}
+          disabled={wsStatus !== "connected" || !input.trim()}
         >
           <SendHorizontal size={24} />
         </button>
